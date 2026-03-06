@@ -477,7 +477,9 @@ const server = http.createServer((req, res) => {
         });
         res.write(': connected\n\n');
         sseClients.push(res);
+        const heartbeat = setInterval(() => res.write(': ping\n\n'), 25000);
         req.on('close', () => {
+            clearInterval(heartbeat);
             sseClients = sseClients.filter(c => c !== res);
         });
         return;
