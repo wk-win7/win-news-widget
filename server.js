@@ -165,11 +165,13 @@ const WIDGET_HTML = `<!DOCTYPE html>
 
     .media-thumb {
       width: 100%;
-      max-height: 220px;
-      object-fit: cover;
+      max-height: 320px;
+      object-fit: contain;
       border-radius: 8px;
       margin-top: 8px;
       display: block;
+      background: #f0f0f0;
+      cursor: zoom-in;
     }
 
     .video-wrap {
@@ -264,6 +266,25 @@ const WIDGET_HTML = `<!DOCTYPE html>
       word-break: break-all;
     }
 
+    /* Lightbox */
+    #lightbox {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.92);
+      z-index: 9999;
+      cursor: zoom-out;
+      align-items: center;
+      justify-content: center;
+    }
+    #lightbox.open { display: flex; }
+    #lightbox img {
+      max-width: 95vw;
+      max-height: 95vh;
+      object-fit: contain;
+      border-radius: 4px;
+    }
+
     /* Scrollbar */
     .feed::-webkit-scrollbar { width: 4px; }
     .feed::-webkit-scrollbar-track { background: transparent; }
@@ -287,6 +308,7 @@ const WIDGET_HTML = `<!DOCTYPE html>
       </div>
     </div>
   </div>
+  <div id="lightbox"><img id="lb-img" src="" alt="Full image"></div>
 
   <script>
     const feed = document.getElementById('feed');
@@ -431,6 +453,18 @@ const WIDGET_HTML = `<!DOCTYPE html>
     es.onmessage = e => {
       showMessage(JSON.parse(e.data), true);
     };
+
+    // Lightbox
+    const lightbox = document.getElementById('lightbox');
+    const lbImg = document.getElementById('lb-img');
+    feed.addEventListener('click', e => {
+      const img = e.target.closest('.media-thumb');
+      if (img) { lbImg.src = img.src; lightbox.classList.add('open'); }
+    });
+    lightbox.addEventListener('click', () => lightbox.classList.remove('open'));
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') lightbox.classList.remove('open');
+    });
   </script>
 </body>
 </html>`;
