@@ -437,11 +437,13 @@ const WIDGET_HTML = `<!DOCTYPE html>
     // Track which message IDs we have already displayed
     const knownIds = new Set();
     let initialLoadDone = false;
+    let pollFailures = 0;
 
     function poll() {
       fetch('/messages')
-        .then(r => r.json())
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(msgs => {
+          pollFailures = 0;
           dot.classList.add('live');
           if (msgCount === 0) subtitle.textContent = 'Live — waiting for messages';
 
@@ -452,11 +454,14 @@ const WIDGET_HTML = `<!DOCTYPE html>
           });
           initialLoadDone = true;
 
-          setTimeout(poll, 3000);
+          setTimeout(poll, 4000);
         })
         .catch(() => {
-          dot.classList.remove('live');
-          subtitle.textContent = 'Reconnecting...';
+          pollFailures++;
+          if (pollFailures >= 2) {
+            dot.classList.remove('live');
+            subtitle.textContent = 'Reconnecting...';
+          }
           setTimeout(poll, 5000);
         });
     }
