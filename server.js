@@ -442,15 +442,21 @@ const WIDGET_HTML = `<!DOCTYPE html>
 
     // Real-time updates via SSE
     const es = new EventSource('/events');
+    let errorTimer = null;
     es.onopen = () => {
+      clearTimeout(errorTimer);
       dot.classList.add('live');
       if (msgCount === 0) subtitle.textContent = 'Live — waiting for messages';
     };
     es.onerror = () => {
-      dot.classList.remove('live');
-      subtitle.textContent = 'Reconnecting...';
+      errorTimer = setTimeout(() => {
+        dot.classList.remove('live');
+        subtitle.textContent = 'Reconnecting...';
+      }, 5000);
     };
     es.onmessage = e => {
+      clearTimeout(errorTimer);
+      dot.classList.add('live');
       showMessage(JSON.parse(e.data), true);
     };
 
