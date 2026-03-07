@@ -434,31 +434,34 @@ const WIDGET_HTML = `<!DOCTYPE html>
       subtitle.textContent = msgCount + ' message' + (msgCount === 1 ? '' : 's');
     }
 
-    // Load existing messages on page load
-    fetch('/messages')
-      .then(r => r.json())
-      .then(msgs => msgs.forEach(m => showMessage(m, false)))
-      .catch(() => {});
+    // Track which message IDs we have already displayed
+    const knownIds = new Set();
+    let initialLoadDone = false;
 
-    // Real-time updates via SSE
-    const es = new EventSource('/events');
-    let errorTimer = null;
-    es.onopen = () => {
-      clearTimeout(errorTimer);
-      dot.classList.add('live');
-      if (msgCount === 0) subtitle.textContent = 'Live — waiting for messages';
-    };
-    es.onerror = () => {
-      errorTimer = setTimeout(() => {
-        dot.classList.remove('live');
-        subtitle.textContent = 'Reconnecting...';
-      }, 5000);
-    };
-    es.onmessage = e => {
-      clearTimeout(errorTimer);
-      dot.classList.add('live');
-      showMessage(JSON.parse(e.data), true);
-    };
+    function poll() {
+      fetch('/messages')
+        .then(r => r.json())
+        .then(msgs => {
+          dot.classList.add('live');
+          if (msgCount === 0) subtitle.textContent = 'Live — waiting for messages';
+
+          const fresh = msgs.filter(m => !knownIds.has(m.message_id));
+          fresh.forEach(m => {
+            knownIds.add(m.message_id);
+            showMessage(m, initialLoadDone); // isNew=true only after first load
+          });
+          initialLoadDone = true;
+
+          setTimeout(poll, 3000);
+        })
+        .catch(() => {
+          dot.classList.remove('live');
+          subtitle.textContent = 'Reconnecting...';
+          setTimeout(poll, 5000);
+        });
+    }
+
+    poll();
 
     // Lightbox
     const lightbox = document.getElementById('lightbox');
