@@ -440,7 +440,7 @@ const WIDGET_HTML = `<!DOCTYPE html>
     let pollFailures = 0;
 
     function poll() {
-      fetch('/messages')
+      fetch('__BASE_URL__/messages')
         .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
         .then(msgs => {
           pollFailures = 0;
@@ -536,15 +536,22 @@ const server = http.createServer((req, res) => {
 
     // JSON feed of all stored messages
     if (req.method === 'GET' && req.url === '/messages') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'no-store',
+        });
         res.end(JSON.stringify(messages));
         return;
     }
 
     // Serve widget page
     if (req.method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(WIDGET_HTML);
+        const proto = (req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim();
+        const host = req.headers['x-forwarded-host'] || req.headers.host;
+        const baseUrl = proto + '://' + host;
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(WIDGET_HTML.replace('__BASE_URL__', baseUrl));
         return;
     }
 
