@@ -149,6 +149,13 @@ const WIDGET_HTML = `<!DOCTYPE html>
       vertical-align: middle;
     }
 
+    .edited-label {
+      font-size: 11px;
+      color: #aaa;
+      font-style: italic;
+      margin-left: 4px;
+    }
+
     .text {
       font-size: 14px;
       line-height: 1.55;
@@ -408,14 +415,25 @@ const WIDGET_HTML = `<!DOCTYPE html>
         if (text) bodyHtml = '<div class="text">' + linkify(text) + '</div>';
       }
 
+      const editedLabel = msg.is_edited ? '<span class="edited-label">(edited)</span>' : '';
+
       div.innerHTML =
         '<div class="card-meta">' +
           '<span class="sender">' + name + badge + '</span>' +
-          '<span class="time">' + time + '</span>' +
+          '<span class="time">' + time + editedLabel + '</span>' +
         '</div>' +
         bodyHtml;
 
       return div;
+    }
+
+    function updateCard(cardEl, newText) {
+      var textEl = cardEl.querySelector('.text');
+      if (textEl) textEl.innerHTML = linkify(newText);
+      var timeEl = cardEl.querySelector('.time');
+      if (timeEl && !timeEl.querySelector('.edited-label')) {
+        timeEl.insertAdjacentHTML('beforeend', '<span class="edited-label">(edited)</span>');
+      }
     }
 
     function showMessage(msg, prepend) {
@@ -432,10 +450,11 @@ const WIDGET_HTML = `<!DOCTYPE html>
       }
       msgCount++;
       subtitle.textContent = msgCount + ' message' + (msgCount === 1 ? '' : 's');
+      return card;
     }
 
-    // Track which message IDs we have already displayed
-    const knownIds = new Set();
+    // Track displayed cards: message_id -> { text, is_edited, cardEl }
+    const knownMessages = new Map();
     let initialLoadDone = false;
     let pollFailures = 0;
 
@@ -447,10 +466,18 @@ const WIDGET_HTML = `<!DOCTYPE html>
           dot.classList.add('live');
           if (msgCount === 0) subtitle.textContent = 'Live — waiting for messages';
 
-          const fresh = msgs.filter(m => !knownIds.has(m.message_id));
-          fresh.forEach(m => {
-            knownIds.add(m.message_id);
-            showMessage(m, initialLoadDone); // isNew=true only after first load
+          msgs.forEach(m => {
+            if (!knownMessages.has(m.message_id)) {
+              const card = showMessage(m, initialLoadDone);
+              knownMessages.set(m.message_id, { text: m.text, is_edited: !!m.is_edited, cardEl: card });
+            } else if (m.is_edited) {
+              const entry = knownMessages.get(m.message_id);
+              if (!entry.is_edited || m.text !== entry.text) {
+                updateCard(entry.cardEl, m.text);
+                entry.text = m.text;
+                entry.is_edited = true;
+              }
+            }
           });
           initialLoadDone = true;
 
@@ -506,6 +533,14 @@ const server = http.createServer((req, res) => {
                     const name = payload.push_name || payload.sender;
                     const preview = (payload.text || '[' + payload.message_type + ']').substring(0, 50);
                     console.log(`[${new Date().toLocaleTimeString()}] ${name}: ${preview}`);
+                } else if (payload.event === 'message_edit' && payload.original_message_id) {
+                    const idx = messages.findIndex(m => m.message_id === payload.original_message_id);
+                    if (idx !== -1) {
+                        messages[idx].text = payload.text;
+                        messages[idx].is_edited = true;
+                        const name = payload.push_name || payload.sender;
+                        console.log(`[${new Date().toLocaleTimeString()}] EDIT ${name}: ${(payload.text || '').substring(0, 50)}`);
+                    }
                 }
             } catch (e) {
                 console.error('Bad payload:', e.message);
@@ -531,6 +566,22 @@ const server = http.createServer((req, res) => {
             clearInterval(heartbeat);
             sseClients = sseClients.filter(c => c !== res);
         });
+        return;
+    }
+
+    // Delete a specific message by ID
+    if (req.method === 'DELETE' && req.url.startsWith('/messages/')) {
+        const id = decodeURIComponent(req.url.slice('/messages/'.length));
+        const before = messages.length;
+        messages = messages.filter(m => m.message_id !== id);
+        if (messages.length < before) {
+            console.log(`[ADMIN] Deleted message: ${id}`);
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end('{"status":"deleted"}');
+        } else {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end('{"status":"not_found"}');
+        }
         return;
     }
 
