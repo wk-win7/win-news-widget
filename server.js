@@ -5,12 +5,40 @@
 // ============================================================
 
 const http = require('http');
+const { Pool } = require('pg');
 
 const PORT = process.env.PORT || 3000;
 const MAX_MESSAGES = 50;
+const DB_ENABLED = !!process.env.DATABASE_URL;
+
+const pool = DB_ENABLED ? new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+}) : null;
 
 let messages = [];
 let sseClients = [];
+
+async function initDb() {
+    if (!DB_ENABLED) {
+        console.log('No DATABASE_URL — running in memory-only mode.');
+        return;
+    }
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS messages (
+            id          SERIAL PRIMARY KEY,
+            message_id  TEXT UNIQUE NOT NULL,
+            payload     JSONB NOT NULL,
+            created_at  TIMESTAMPTZ DEFAULT NOW()
+        )
+    `);
+    const { rows } = await pool.query(
+        `SELECT payload FROM messages ORDER BY created_at DESC LIMIT $1`,
+        [MAX_MESSAGES]
+    );
+    messages = rows.map(r => r.payload).reverse();
+    console.log(`Loaded ${messages.length} messages from database.`);
+}
 
 // ============================================================
 // Widget HTML
@@ -519,12 +547,19 @@ const server = http.createServer((req, res) => {
     if (req.method === 'POST' && req.url === '/webhooks') {
         let body = '';
         req.on('data', chunk => { body += chunk; });
-        req.on('end', () => {
+        req.on('end', async () => {
             try {
                 const payload = JSON.parse(body);
                 if (payload.event === 'group_message') {
                     messages.unshift(payload);
                     if (messages.length > MAX_MESSAGES) messages.pop();
+
+                    if (DB_ENABLED) {
+                        await pool.query(
+                            'INSERT INTO messages (message_id, payload) VALUES ($1, $2) ON CONFLICT (message_id) DO NOTHING',
+                            [payload.message_id, payload]
+                        );
+                    }
 
                     // Push to all connected SSE clients
                     const data = `data: ${JSON.stringify(payload)}\n\n`;
@@ -538,6 +573,12 @@ const server = http.createServer((req, res) => {
                     if (idx !== -1) {
                         messages[idx].text = payload.text;
                         messages[idx].is_edited = true;
+                        if (DB_ENABLED) {
+                            await pool.query(
+                                `UPDATE messages SET payload = payload || jsonb_build_object('text', $1::text, 'is_edited', true) WHERE payload->>'message_id' = $2`,
+                                [payload.text, payload.original_message_id]
+                            );
+                        }
                         const name = payload.push_name || payload.sender;
                         console.log(`[${new Date().toLocaleTimeString()}] EDIT ${name}: ${(payload.text || '').substring(0, 50)}`);
                     }
@@ -576,12 +617,52 @@ const server = http.createServer((req, res) => {
         messages = messages.filter(m => m.message_id !== id);
         if (messages.length < before) {
             console.log(`[ADMIN] Deleted message: ${id}`);
+            if (DB_ENABLED) {
+                pool.query('DELETE FROM messages WHERE message_id = $1', [id])
+                    .catch(e => console.error('DB delete error:', e.message));
+            }
             res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
             res.end('{"status":"deleted"}');
         } else {
             res.writeHead(404, { 'Content-Type': 'application/json' });
             res.end('{"status":"not_found"}');
         }
+        return;
+    }
+
+    // Archive: GET /archive?month=YYYY-MM → messages for that month
+    //          GET /archive               → list of available months
+    if (req.method === 'GET' && req.url.startsWith('/archive')) {
+        if (!DB_ENABLED) {
+            res.writeHead(503, { 'Content-Type': 'application/json' });
+            res.end('{"error":"no database configured"}');
+            return;
+        }
+        (async () => {
+            try {
+                const qs = new URL(req.url, 'http://localhost').searchParams;
+                const month = qs.get('month');
+                let data;
+                if (month) {
+                    const { rows } = await pool.query(
+                        `SELECT payload FROM messages WHERE to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM') = $1 ORDER BY created_at ASC`,
+                        [month]
+                    );
+                    data = rows.map(r => r.payload);
+                } else {
+                    const { rows } = await pool.query(
+                        `SELECT DISTINCT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM') AS month FROM messages ORDER BY month DESC`
+                    );
+                    data = rows.map(r => r.month);
+                }
+                res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+                res.end(JSON.stringify(data));
+            } catch (e) {
+                console.error('Archive error:', e.message);
+                res.writeHead(500);
+                res.end('{"error":"database error"}');
+            }
+        })();
         return;
     }
 
@@ -610,10 +691,15 @@ const server = http.createServer((req, res) => {
     res.end('Not found');
 });
 
-server.listen(PORT, () => {
-    console.log('============================================================');
-    console.log('  WhatsApp News Widget');
-    console.log('============================================================');
-    console.log('Widget: http://localhost:' + PORT);
-    console.log('Waiting for messages from WhatsApp monitor...\n');
+initDb().then(() => {
+    server.listen(PORT, () => {
+        console.log('============================================================');
+        console.log('  WhatsApp News Widget');
+        console.log('============================================================');
+        console.log('Widget: http://localhost:' + PORT);
+        console.log('Waiting for messages from WhatsApp monitor...\n');
+    });
+}).catch(err => {
+    console.error('Database initialization failed:', err.message);
+    process.exit(1);
 });
