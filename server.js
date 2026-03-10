@@ -465,17 +465,15 @@ const WIDGET_HTML = `<!DOCTYPE html>
       }
     }
 
-    function showMessage(msg, prepend) {
+    function showMessage(msg, isNew) {
       empty.style.display = 'none';
-      const card = buildCard(msg, prepend);
-      if (prepend) {
-        feed.insertBefore(card, feed.firstChild);
+      const card = buildCard(msg, isNew);
+      feed.insertBefore(card, feed.firstChild);
+      if (isNew) {
         setTimeout(() => {
           const b = card.querySelector('.new-badge');
           if (b) b.remove();
         }, 6000);
-      } else {
-        feed.appendChild(card);
       }
       msgCount++;
       subtitle.textContent = msgCount + ' message' + (msgCount === 1 ? '' : 's');
