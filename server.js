@@ -266,10 +266,11 @@ const WIDGET_HTML = `<!DOCTYPE html>
     }
 
     .link-preview-img {
-      width: 100%;
+      max-width: 100%;
       max-height: 180px;
-      object-fit: cover;
+      object-fit: contain;
       display: block;
+      margin: 0 auto;
     }
 
     .link-preview-body {
@@ -494,6 +495,16 @@ const WIDGET_HTML = `<!DOCTYPE html>
           dot.classList.add('live');
           if (msgCount === 0) subtitle.textContent = 'Live — waiting for messages';
 
+          const serverIds = new Set(msgs.map(m => m.message_id));
+          for (const [id, entry] of knownMessages) {
+            if (!serverIds.has(id)) {
+              entry.cardEl.remove();
+              knownMessages.delete(id);
+              msgCount--;
+            }
+          }
+          if (msgCount <= 0) { msgCount = 0; empty.style.display = ''; }
+
           msgs.forEach(m => {
             if (!knownMessages.has(m.message_id)) {
               const card = showMessage(m, initialLoadDone);
@@ -507,6 +518,7 @@ const WIDGET_HTML = `<!DOCTYPE html>
               }
             }
           });
+          if (msgCount > 0) subtitle.textContent = msgCount + ' message' + (msgCount === 1 ? '' : 's');
           initialLoadDone = true;
 
           setTimeout(poll, 4000);
