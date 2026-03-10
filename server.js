@@ -560,7 +560,7 @@ const server = http.createServer((req, res) => {
         req.on('end', async () => {
             try {
                 const payload = JSON.parse(body);
-                if (payload.event === 'group_message') {
+                if (payload.event === 'group_message' && (payload.text || payload.thumbnail)) {
                     messages.push(payload);
                     if (messages.length > MAX_MESSAGES) messages.shift();
 
