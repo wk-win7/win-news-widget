@@ -561,8 +561,8 @@ const server = http.createServer((req, res) => {
             try {
                 const payload = JSON.parse(body);
                 if (payload.event === 'group_message') {
-                    messages.unshift(payload);
-                    if (messages.length > MAX_MESSAGES) messages.pop();
+                    messages.push(payload);
+                    if (messages.length > MAX_MESSAGES) messages.shift();
 
                     if (DB_ENABLED) {
                         await pool.query(
